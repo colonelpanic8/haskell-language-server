@@ -42,6 +42,11 @@ packages:
 -- See https://github.com/haskell/haskell-language-server/blob/master/.gitlab-ci.yml
 optional-packages: vendored/*/*.cabal
 
+source-repository-package
+  type: git
+  location: https://github.com/wz1000/hie-bios
+  tag: 9ddbddc902ea1749dce36c8994922b2d1a18210d
+
 tests: True
 
 -- mfsolve has duplicate instances in its test suite

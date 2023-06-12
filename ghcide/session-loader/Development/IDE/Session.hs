@@ -43,7 +43,6 @@ import qualified Data.HashMap.Strict                  as HM
 import           Data.IORef
 import qualified Data.Set                             as OS
 import           Data.List
-import qualified Data.List                            as L
 import           Data.List.Extra                      (dropPrefix, split)
 import qualified Data.Map.Strict                      as Map
 import           Data.Maybe
@@ -121,18 +120,13 @@ import GHC.Driver.Errors.Types
 import GHC.Driver.Env (hscSetActiveUnitId, hsc_all_home_unit_ids)
 import GHC.Driver.Make (checkHomeUnitsClosed)
 import GHC.Unit.State
-import GHC.Unit.Env
 import GHC.Types.Error (errMsgDiagnostic)
 import GHC.Data.Bag
+import GHC.Unit.Env
 #endif
 
 import GHC.ResponseFile
 import qualified Data.List.NonEmpty as NE
-import GHC.Unit.Env
-import GHC.Unit.Home
-import GHC.Unit.Home.ModInfo
-
-import GHC.Utils.Trace
 
 data Log
   = LogSettingInitialDynFlags
@@ -236,7 +230,7 @@ data SessionLoadingOptions = SessionLoadingOptions
   -- | Load the cradle with an optional 'hie.yaml' location.
   -- If a 'hie.yaml' is given, use it to load the cradle.
   -- Otherwise, use the provided project root directory to determine the cradle type.
-  , loadCradle             :: Maybe FilePath -> FilePath -> IO (HieBios.Cradle Void)
+  , loadCradle             :: Recorder (WithPriority Log) -> Maybe FilePath -> FilePath -> IO (HieBios.Cradle Void)
   -- | Given the project name and a set of command line flags,
   --   return the path for storing generated GHC artifacts,
   --   or 'Nothing' to respect the cradle setting
@@ -273,22 +267,23 @@ instance Default SessionLoadingOptions where
 -- using the provided root directory for discovering the project.
 -- The implicit config uses different heuristics to determine the type
 -- of the project that may or may not be accurate.
-loadWithImplicitCradle :: Maybe FilePath
+loadWithImplicitCradle :: Recorder (WithPriority Log) -> Maybe FilePath
                           -- ^ Optional 'hie.yaml' location. Will be used if given.
                           -> FilePath
                           -- ^ Root directory of the project. Required as a fallback
                           -- if no 'hie.yaml' location is given.
                           -> IO (HieBios.Cradle Void)
-loadWithImplicitCradle mHieYaml rootDir = do
+loadWithImplicitCradle recorder mHieYaml rootDir = do
+  let logger = toCologActionWithPrio (cmapWithPrio LogHieBios recorder)
   case mHieYaml of
-    Just yaml -> HieBios.loadCradle yaml
-    Nothing   -> HieBios.loadImplicitCradle $ addTrailingPathSeparator rootDir
+    Just yaml -> HieBios.loadCradle logger yaml
+    Nothing   -> HieBios.loadImplicitCradle logger $ addTrailingPathSeparator rootDir
 
 getInitialGhcLibDirDefault :: Recorder (WithPriority Log) -> FilePath -> IO (Maybe LibDir)
 getInitialGhcLibDirDefault recorder rootDir = do
   hieYaml <- findCradle def rootDir
-  cradle <- loadCradle def hieYaml rootDir
-  libDirRes <- getRuntimeGhcLibDir (toCologActionWithPrio (cmapWithPrio LogHieBios recorder)) cradle
+  cradle <- loadCradle def recorder hieYaml rootDir
+  libDirRes <- getRuntimeGhcLibDir cradle
   case libDirRes of
       CradleSuccess libdir -> pure $ Just $ LibDir libdir
       CradleFail err -> do
@@ -438,6 +433,7 @@ loadSession recorder = loadSessionWithOptions recorder def
 
 loadSessionWithOptions :: Recorder (WithPriority Log) -> SessionLoadingOptions -> FilePath -> IO (Action IdeGhcSession)
 loadSessionWithOptions recorder SessionLoadingOptions{..} dir = do
+  cradle_files <- newIORef []
   -- Mapping from hie.yaml file to HscEnv, one per hie.yaml file
   hscEnvs <- newVar Map.empty :: IO (Var HieMap)
   -- Mapping from a Filepath to HscEnv
@@ -614,7 +610,7 @@ loadSessionWithOptions recorder SessionLoadingOptions{..} dir = do
            when (isNothing hieYaml) $
              logWith recorder Warning $ LogCradleNotFound lfpLog
 
-           cradle <- loadCradle hieYaml dir
+           cradle <- loadCradle recorder hieYaml dir
            -- TODO: Why are we repeating the same command we have on line 646?
            lfp <- flip makeRelative cfp <$> getCurrentDirectory
 
@@ -627,7 +623,8 @@ loadSessionWithOptions recorder SessionLoadingOptions{..} dir = do
            eopts <- mRunLspTCallback lspEnv (withIndefiniteProgress progMsg NotCancellable) $
               withTrace "Load cradle" $ \addTag -> do
                   addTag "file" lfp
-                  res <- cradleToOptsAndLibDir recorder cradle cfp
+                  old_files <- readIORef cradle_files
+                  res <- cradleToOptsAndLibDir recorder cradle cfp old_files
                   addTag "result" (show res)
                   return res
 
@@ -642,7 +639,8 @@ loadSessionWithOptions recorder SessionLoadingOptions{..} dir = do
                      error $ "GHC installation not found in libdir: " <> libdir
                  InstallationMismatch{..} ->
                      return (([renderPackageSetupException cfp GhcVersionMismatch{..}], Nothing),[])
-                 InstallationChecked _compileTime _ghcLibCheck ->
+                 InstallationChecked _compileTime _ghcLibCheck -> do
+                   atomicModifyIORef' cradle_files (\xs -> (cfp:xs,()))
                    session (hieYaml, toNormalizedFilePath' cfp, opts, libDir)
              -- Failure case, either a cradle error or the none cradle
              Left err -> do
@@ -698,19 +696,18 @@ loadSessionWithOptions recorder SessionLoadingOptions{..} dir = do
 -- | Run the specific cradle on a specific FilePath via hie-bios.
 -- This then builds dependencies or whatever based on the cradle, gets the
 -- GHC options/dynflags needed for the session and the GHC library directory
-cradleToOptsAndLibDir :: Recorder (WithPriority Log) -> Cradle Void -> FilePath
+cradleToOptsAndLibDir :: Recorder (WithPriority Log) -> Cradle Void -> FilePath -> [FilePath]
                       -> IO (Either [CradleError] (ComponentOptions, FilePath))
-cradleToOptsAndLibDir recorder cradle file = do
+cradleToOptsAndLibDir recorder cradle file old_files = do
     -- let noneCradleFoundMessage :: FilePath -> T.Text
     --     noneCradleFoundMessage f = T.pack $ "none cradle found for " <> f <> ", ignoring the file"
     -- Start off by getting the session options
     logWith recorder Debug $ LogCradle cradle
-    let logger = toCologActionWithPrio $ cmapWithPrio LogHieBios recorder
-    cradleRes <- HieBios.getCompilerOptions logger file cradle
+    cradleRes <- HieBios.getCompilerOptions file old_files cradle
     case cradleRes of
         CradleSuccess r -> do
             -- Now get the GHC lib dir
-            libDirRes <- getRuntimeGhcLibDir logger cradle
+            libDirRes <- getRuntimeGhcLibDir cradle
             case libDirRes of
                 -- This is the successful path
                 CradleSuccess libDir -> pure (Right (r, libDir))
@@ -774,15 +771,6 @@ setNameCache :: IORef NameCache -> HscEnv -> HscEnv
 #endif
 setNameCache nc hsc = hsc { hsc_NC = nc }
 
-pprHomeUnitGraph :: HomeUnitGraph -> Compat.SDoc
-pprHomeUnitGraph unitEnv = Compat.vcat (map (\(k, v) -> pprHomeUnitEnv k v) $ Map.assocs $ unitEnv_graph unitEnv)
-
-pprHomeUnitEnv :: UnitId -> HomeUnitEnv -> Compat.SDoc
-pprHomeUnitEnv uid env =
-  Compat.ppr uid Compat.<+> Compat.text "(flags:" Compat.<+> Compat.ppr (homeUnitId_ $ homeUnitEnv_dflags env) Compat.<+> Compat.text "," Compat.<+> Compat.ppr (fmap homeUnitId $ homeUnitEnv_home_unit env) Compat.<+> Compat.text ")" Compat.<+> Compat.text "->"
-  Compat.$$ Compat.nest 4 (pprHPT $ homeUnitEnv_hpt env)
-
-
 -- | Create a mapping from FilePaths to HscEnvEqs
 newComponentCache
          :: Recorder (WithPriority Log)
@@ -798,7 +786,6 @@ newComponentCache recorder exts cradlePath cfp hsc_env old_cis new_cis = do
         mkMap = Map.fromList . map (\ci -> (componentUnitId ci, ci))
     let dfs = map componentDynFlags $ Map.elems cis
         uids = Map.keys cis
-    pprTraceM "newComponentCache" $ Compat.ppr uids
     hscEnv' <- -- Set up a multi component session with the other units on GHC 9.4
               Compat.initUnits dfs hsc_env
 
@@ -811,8 +798,8 @@ newComponentCache recorder exts cradlePath cfp hsc_env old_cis new_cis = do
 
     case closure_errs of
       errs@(_:_) -> do
-        let rendered = map (ideErrorWithSource (Just "cradle") (Just DsError) cfp . T.pack . Compat.printWithoutUniques) errs
-            res = (rendered,Nothing)
+        let rendered_err = map (ideErrorWithSource (Just "cradle") (Just DiagnosticSeverity_Error) cfp . T.pack . Compat.printWithoutUniques) errs
+            res = (rendered_err,Nothing)
             dep_info = foldMap componentDependencyInfo (filter isBad $ Map.elems cis)
             bad_units = OS.fromList $ concat $ do
               x <- bagToList $ mapBag errMsgDiagnostic $ unionManyBags $ map Compat.getMessages errs
@@ -837,6 +824,7 @@ newComponentCache recorder exts cradlePath cfp hsc_env old_cis new_cis = do
           res <- loadDLL hscEnv' "libm.so.6"
           case res of
             Nothing  -> pure ()
+            Just err -> logWith recorder Error $ LogDLLLoadError err
 
         fmap (addSpecial cfp) $ forM (Map.elems cis) $ \ci -> do
           let df = componentDynFlags ci
@@ -1162,7 +1150,7 @@ setOptions (ComponentOptions theOpts compRoot _) dflags = do
         (dflags', targets') <- addCmdOpts theOpts dflags
         let dflags'' =
 #if MIN_VERSION_ghc(9,3,0)
-                case unitIdString (homeUnitId_ df') of
+                case unitIdString (homeUnitId_ dflags') of
                      -- cabal uses main for the unit id of all executable packages
                      -- This makes multi-component sessions confused about what
                      -- options to use for that component.
@@ -1170,7 +1158,7 @@ setOptions (ComponentOptions theOpts compRoot _) dflags = do
                      -- This works because there won't be any dependencies on the
                      -- executable unit.
                      "main" ->
-                       let hash = B.unpack $ B16.encode $ H.finalize $ H.updates H.init (map B.pack $ componentOptions opts)
+                       let hash = B.unpack $ B16.encode $ H.finalize $ H.updates H.init (map B.pack $ theOpts)
                            hashed_uid = Compat.toUnitId (Compat.stringToUnit ("main-"++hash))
                        in setHomeUnitId_ hashed_uid dflags'
                      _ -> dflags'
