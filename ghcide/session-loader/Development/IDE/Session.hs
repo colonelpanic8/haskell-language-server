@@ -76,7 +76,6 @@ import qualified HIE.Bios.Cradle                      as HieBios
 import           HIE.Bios.Environment                 hiding (getCacheDir)
 import           HIE.Bios.Types                       hiding (Log)
 import qualified HIE.Bios.Types                       as HieBios
-import           Hie.Implicit.Cradle                  (loadImplicitHieCradle)
 import           Ide.Logger                           (Pretty (pretty),
                                                        Priority (Debug, Error, Info, Warning),
                                                        Recorder, WithPriority,
@@ -283,7 +282,7 @@ loadWithImplicitCradle :: Maybe FilePath
 loadWithImplicitCradle mHieYaml rootDir = do
   case mHieYaml of
     Just yaml -> HieBios.loadCradle yaml
-    Nothing   -> loadImplicitHieCradle $ addTrailingPathSeparator rootDir
+    Nothing   -> HieBios.loadImplicitCradle $ addTrailingPathSeparator rootDir
 
 getInitialGhcLibDirDefault :: Recorder (WithPriority Log) -> FilePath -> IO (Maybe LibDir)
 getInitialGhcLibDirDefault recorder rootDir = do
