@@ -469,11 +469,15 @@ filterUsages = id
 
 -- | Mitigation for https://gitlab.haskell.org/ghc/ghc/-/issues/22744
 shareUsages :: ModIface -> ModIface
-shareUsages iface = iface {mi_usages = usages}
+shareUsages iface
+  = iface
+#if !MIN_VERSION_ghc(9,7,0)
+      {mi_usages = usages}
   where usages = map go (mi_usages iface)
         go usg@UsageFile{} = usg {usg_file_path = fp}
           where !fp = shareFilePath (usg_file_path usg)
         go usg = usg
+#endif
 
 
 mkHiFileResultNoCompile :: HscEnv -> TcModuleResult -> IO HiFileResult
@@ -778,7 +782,9 @@ unnecessaryDeprecationWarningFlags
     , Opt_WarnUnusedForalls
     , Opt_WarnUnusedRecordWildcards
     , Opt_WarnInaccessibleCode
+#if !MIN_VERSION_ghc(9,7,0)
     , Opt_WarnWarningsDeprecations
+#endif
     ]
 
 -- | Add a unnecessary/deprecated tag to the required diagnostics.
@@ -793,8 +799,11 @@ tagDiag (w@(Reason warning), (nfp, sh, fd))
   = (w, (nfp, sh, fd { _tags = Just $ tag : concat (_tags fd) }))
   where
     requiresTag :: WarningFlag -> Maybe DiagnosticTag
+#if !MIN_VERSION_ghc(9,7,0)
+    -- TODO wz1000: handle deprecations in 9.7+
     requiresTag Opt_WarnWarningsDeprecations
       = Just DiagnosticTag_Deprecated
+#endif
     requiresTag wflag  -- deprecation was already considered above
       | wflag `elem` unnecessaryDeprecationWarningFlags
       = Just DiagnosticTag_Unnecessary

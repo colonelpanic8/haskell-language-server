@@ -7,6 +7,10 @@ module Development.IDE.GHC.Compat.Iface (
     ) where
 
 import           GHC
+#if MIN_VERSION_ghc(9,7,0)
+import           GHC.Iface.Errors.Ppr                  (missingInterfaceErrorDiagnostic)
+import           GHC.Iface.Errors.Types                (IfaceMessage)
+#endif
 #if MIN_VERSION_ghc(9,3,0)
 import           GHC.Driver.Session                    (targetProfile)
 #endif
@@ -39,7 +43,9 @@ writeIfaceFile env = MkIface.writeIfaceFile (hsc_dflags env)
 
 cannotFindModule :: HscEnv -> ModuleName -> FindResult -> SDoc
 cannotFindModule env modname fr =
-#if MIN_VERSION_ghc(9,2,0)
+#if MIN_VERSION_ghc(9,7,0)
+    missingInterfaceErrorDiagnostic (defaultDiagnosticOpts @IfaceMessage) $ Iface.cannotFindModule env modname fr
+#elif MIN_VERSION_ghc(9,2,0)
     Iface.cannotFindModule env modname fr
 #else
     Finder.cannotFindModule (hsc_dflags env) modname fr

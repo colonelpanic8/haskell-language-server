@@ -45,6 +45,8 @@ module Development.IDE.GHC.Compat(
 
     Usage(..),
 
+    liftZonkM,
+
     FastStringCompat,
     bytesFS,
     mkFastStringByteString,
@@ -59,6 +61,7 @@ module Development.IDE.GHC.Compat(
     combineRealSrcSpans,
 
     nonDetOccEnvElts,
+    nonDetFoldOccEnv,
 
     isQualifiedImport,
     GhcVersion(..),
@@ -98,6 +101,7 @@ module Development.IDE.GHC.Compat(
     simplifyExpr,
     tidyExpr,
     emptyTidyEnv,
+    tcInitTidyEnv,
     corePrepExpr,
     corePrepPgm,
     lintInteractiveExpr,
@@ -161,6 +165,9 @@ import           Data.Coerce                           (coerce)
 import           Data.String                           (IsString (fromString))
 
 
+#if MIN_VERSION_ghc(9,7,0)
+import           GHC.Tc.Zonk.TcType                    (tcInitTidyEnv)
+#endif
 #if MIN_VERSION_ghc(9,0,0)
 #if MIN_VERSION_ghc(9,5,0)
 import           GHC.Core.Lint.Interactive                           (interactiveInScope)
@@ -288,6 +295,16 @@ import GHC.Driver.Config.Stg.Pipeline
 import GHC.Driver.Plugins                              (PsMessages (..))
 #endif
 
+#if !MIN_VERSION_ghc(9,7,0)
+liftZonkM :: a -> a
+liftZonkM = id
+#endif
+
+#if !MIN_VERSION_ghc(9,7,0)
+nonDetFoldOccEnv :: (a -> b -> b) -> b -> OccEnv a -> b
+nonDetFoldOccEnv = foldOccEnv
+#endif
+
 #if !MIN_VERSION_ghc(9,3,0)
 nonDetOccEnvElts :: OccEnv a -> [a]
 nonDetOccEnvElts = occEnvElts
@@ -368,7 +385,9 @@ myCoreToStg logger dflags ictxt
 #endif
              this_mod ml prepd_binds
 
-#if MIN_VERSION_ghc(9,4,2)
+#if MIN_VERSION_ghc(9,8,0)
+    (unzip -> (stg_binds2,_),_)
+#elif MIN_VERSION_ghc(9,4,2)
     (stg_binds2,_)
 #else
     stg_binds2

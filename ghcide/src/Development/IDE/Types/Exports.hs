@@ -46,7 +46,7 @@ data ExportsMap = ExportsMap
     }
 
 instance NFData ExportsMap where
-  rnf (ExportsMap a b) = foldOccEnv (\a b -> rnf a `seq` b) (seqEltsUFM rnf b) a
+  rnf (ExportsMap a b) = nonDetFoldOccEnv (\a b -> rnf a `seq` b) (seqEltsUFM rnf b) a
 
 instance Show ExportsMap where
   show (ExportsMap occs mods) =
@@ -83,7 +83,7 @@ mkTypeOcc :: Text -> OccName
 mkTypeOcc t = mkTcOccFS $ mkFastStringByteString $ encodeUtf8 t
 
 exportsMapSize :: ExportsMap -> Int
-exportsMapSize = foldOccEnv (\_ x -> x+1) 0 . getExportsMap
+exportsMapSize = nonDetFoldOccEnv (\_ x -> x+1) 0 . getExportsMap
 
 instance Semigroup ExportsMap where
   ExportsMap a b <> ExportsMap c d = ExportsMap (plusOccEnv_C (<>) a c) (plusUFM_C (<>) b d)

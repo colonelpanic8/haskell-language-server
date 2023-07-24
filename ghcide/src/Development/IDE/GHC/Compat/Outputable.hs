@@ -61,6 +61,9 @@ import           GHC.Parser.Errors.Types
 #endif
 import qualified GHC.Parser.Errors.Ppr           as Ppr
 import qualified GHC.Types.Error                 as Error
+#if MIN_VERSION_ghc(9,7,0)
+import           GHC.Types.Error                 (defaultDiagnosticOpts)
+#endif
 import           GHC.Types.Name.Ppr
 import           GHC.Types.Name.Reader
 import           GHC.Types.SourceError
@@ -192,7 +195,9 @@ pprNoLocMsgEnvelope (MsgEnvelope { errMsgDiagnostic = e
                                  , errMsgContext   = unqual })
   = sdocWithContext $ \ctx ->
     withErrStyle unqual $
-#if MIN_VERSION_ghc(9,3,0)
+#if MIN_VERSION_ghc(9,7,0)
+      (formatBulleted e)
+#elif MIN_VERSION_ghc(9,3,0)
       (formatBulleted ctx $ e)
 #else
       (formatBulleted ctx $ Error.renderDiagnostic e)

@@ -286,7 +286,7 @@ gblBindingType (Just hsc) (Just gblEnv) = do
       showDoc = showDocRdrEnv hsc rdrEnv
       hasSig :: (Monad m) => Name -> m a -> m (Maybe a)
       hasSig name f = whenMaybe (name `elemNameSet` sigs) f
-      bindToSig id = do
+      bindToSig id = liftZonkM $ do
         let name = idName id
         hasSig name $ do
           env <- tcInitTidyEnv
