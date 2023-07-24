@@ -23,7 +23,7 @@ common warnings
 
 library
     import:           warnings
-    if impl(ghc < 9.2)
+    if impl(ghc < 9.2 || >= 9.8)
       buildable: False
     else
       buildable: True
@@ -48,7 +48,7 @@ library
 
 test-suite tests
     import:           warnings
-    if impl(ghc < 9.2)
+    if impl(ghc < 9.2 || >= 9.8)
       buildable: False
     else
       buildable: True
