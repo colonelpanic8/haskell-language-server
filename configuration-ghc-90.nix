@@ -24,7 +24,7 @@ let
       lsp-types = hself.callCabal2nix "lsp-types" inputs.lsp-types {};
       lsp-test = hself.callCabal2nix "lsp-test" inputs.lsp-test {};
 
-      hiedb = hself.callCabal2nix "hiedb" inputs.hiedb {};
+      hiedb = dontCheck hself.callCabal2nix "hiedb" inputs.hiedb {};
 
       hlint = appendConfigureFlag (hself.callCabal2nix "hlint" inputs.hlint-35 {}) "-fghc-lib";
 

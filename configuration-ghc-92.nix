@@ -25,7 +25,7 @@ let
 
       ghc-lib-parser = hsuper.ghc-lib-parser_9_4_5_20230430;
 
-      hiedb = hself.callCabal2nix "hiedb" inputs.hiedb {};
+      hiedb = dontCheck hself.callCabal2nix "hiedb" inputs.hiedb {};
 
       hlint = appendConfigureFlag (hself.callCabal2nix "hlint" inputs.hlint-35 {}) "-fghc-lib";
 

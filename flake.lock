@@ -107,6 +107,23 @@
         "type": "github"
       }
     },
+    "hiedb": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1691542357,
+        "narHash": "sha256-90ftphhoIo0CklJrjfCGQrZIUKZfdMJ2Og6tep9dmJ8=",
+        "owner": "nlander",
+        "repo": "HieDb",
+        "rev": "4eebfcf8fab54f24808e6301227d77ae64d2509c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nlander",
+        "ref": "all-new-functions",
+        "repo": "HieDb",
+        "type": "github"
+      }
+    },
     "hlint-35": {
       "flake": false,
       "locked": {
@@ -216,6 +233,7 @@
         "gitignore": "gitignore",
         "haskell-hie-bios": "haskell-hie-bios",
         "haskell-implicit-hie-cradle": "haskell-implicit-hie-cradle",
+        "hiedb": "hiedb",
         "hlint-35": "hlint-35",
         "hlint-36": "hlint-36",
         "lsp": "lsp",
